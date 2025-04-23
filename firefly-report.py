@@ -9,35 +9,48 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
+    import pandas as pd
+    import io
+    return io, mo, pd
 
-    app_title = mo.md("# Firefly Reporting")
-    import_title = mo.md("## Import Transactions")
+
+@app.cell
+def _(mo):
+    mo.md(
+        r"""
+        # Firefly Reporting
+
+        ## Import Transaction CSV
+        """
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    import_button = mo.ui.run_button(label="Import")
 
     file = mo.ui.file(
         label="Select Transaction CSV",
         filetypes=[".csv"],
-        kind="button"
+        kind="button",
     )
 
-    mo.vstack([app_title, import_title, file])
-    return file, mo
+    mo.vstack([file, import_button])
+    return file, import_button
 
 
 @app.cell
-def _(file):
-    import pandas as pd
-    import io
+def _(file, import_button, io, mo, pd):
+    mo.stop(not import_button.value)
 
-    if file.value is not None:
-        try:
-            csv_data = file.value[0].contents.decode('utf-8')
-            df = pd.read_csv(io.StringIO(csv_data))
-        except Exception as e:
-            print(f"Error reading CSV data: {e}")
-            df = pd.DataFrame()
-    else:
-        df = pd.DataFrame()  # Initialize an empty DataFrame if no file is selected
-    return df, pd
+    try:
+        csv_data = file.value[0].contents.decode('utf-8')
+        df = pd.read_csv(io.StringIO(csv_data))
+    except Exception as e:
+        print(f"Error reading CSV data: {e}")
+        df = pd.DataFrame()
+    return (df,)
 
 
 @app.cell
@@ -72,12 +85,12 @@ def _(df_enhanced, mo):
         _column_values = df_enhanced[column_name].unique()
         _column_values = [value for value in _column_values if isinstance(value, str)]
         _column_values.sort()
-    
+
         return _column_values
 
     def get_column_selector(column_name):
         _column_values = get_column_values(column_name)
-    
+
         return mo.ui.multiselect(options=_column_values)
 
     def get_column_selector_type():
@@ -134,6 +147,12 @@ def _(df_enhanced, mo):
 
 
 @app.cell
+def _(mo):
+    mo.md(r"""## Data operations""")
+    return
+
+
+@app.cell
 def _(
     account_name_dict,
     account_name_dict2,
@@ -144,19 +163,104 @@ def _(
     tag,
     type,
 ):
-    mo.vstack(
-        [
-            mo.md("## Filter Transactions"),
-            date_range_selector,
-            amount_range_selector,
-            mo.hstack([mo.md("Catgory"), *category], justify="start", gap=5, widths=[1,1,4]),
-            mo.hstack([mo.md("Tag"), *tag], justify="start", gap=5, widths=[1,1,4]),
-            mo.hstack([mo.md("Type"), *type], justify="start", gap=5, widths=[1, 1,4]),
-            *[mo.hstack([mo.md(selector), *items], justify="start", gap=5, widths=[1,1,4]) for selector, items in account_name_dict.items()],
-            *[mo.hstack(selector, justify="start", gap=5) for selector in account_name_dict2.values()],
-
-        ]
+    mo.accordion(
+        {
+            "Filter": mo.vstack(
+                [
+                    date_range_selector,
+                    amount_range_selector,
+                    mo.hstack(
+                        [mo.md("Catgory"), *category],
+                        justify="start",
+                        gap=5,
+                        widths=[1, 1, 4],
+                    ),
+                    mo.hstack(
+                        [mo.md("Tag"), *tag],
+                        justify="start",
+                        gap=5,
+                        widths=[1, 1, 4],
+                    ),
+                    mo.hstack(
+                        [mo.md("Type"), *type],
+                        justify="start",
+                        gap=5,
+                        widths=[1, 1, 4],
+                    ),
+                    *[
+                        mo.hstack(
+                            [mo.md(selector), *items],
+                            justify="start",
+                            gap=5,
+                            widths=[1, 1, 4],
+                        )
+                        for selector, items in account_name_dict.items()
+                    ],
+                    *[
+                        mo.hstack(selector, justify="start", gap=5)
+                        for selector in account_name_dict2.values()
+                    ],
+                ]
+            ),
+            "Display": mo.vstack([])
+        }
     )
+    return
+
+
+@app.cell
+def _(
+    account_name_dict,
+    amount_range_selector,
+    category,
+    date_range_selector,
+    df_enhanced,
+    tag,
+    type,
+):
+    _df_filtered = df_enhanced.copy()
+
+    # Date Range Filter
+    _df_filtered = _df_filtered[
+        (_df_filtered["date"].dt.date >= date_range_selector.value[0])
+        & (_df_filtered["date"].dt.date <= date_range_selector.value[1])
+    ]
+
+    # Amount Range Filter
+    _df_filtered = _df_filtered[
+        (_df_filtered["leg_amount"] >= amount_range_selector.value[0])
+        & (_df_filtered["leg_amount"] <= amount_range_selector.value[1])
+    ]
+
+
+    def apply_filter(_df, column_name, selector_array):
+        selector_type = selector_array[0].value
+        selector_values = selector_array[1].value
+
+        if selector_type is None or not selector_values:
+            return _df
+
+        if selector_type == "Include":
+            _df = _df[_df[column_name].isin(selector_values)]
+        elif selector_type == "Exclude":
+            _df = _df[~_df[column_name].isin(selector_values)]
+        return _df
+
+
+    # Category Filter
+    _df_filtered = apply_filter(_df_filtered, "category", category)
+
+    # Tag Filter
+    _df_filtered = apply_filter(_df_filtered, "tags", tag)
+
+    # Type Filter
+    _df_filtered = apply_filter(_df_filtered, "type", type)
+
+    # Account Name Filter
+    for _account_type, items in account_name_dict.items():
+        _df_filtered = apply_filter(_df_filtered, "account_name", items)
+
+    _df_filtered
     return
 
 
