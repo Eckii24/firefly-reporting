@@ -151,8 +151,9 @@ def _(df_enhanced, mo):
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""## Data operations""")
+def _(file, mo):
+    mo.stop(len(file.value) == 0)
+    mo.md("## Data operations")
     return
 
 
@@ -228,6 +229,13 @@ def _(
 
 
 @app.cell
+def _(file, mo):
+    mo.stop(len(file.value) == 0)
+    mo.md("## Data Analysis")
+    return
+
+
+@app.cell
 def _(
     account_name_dict,
     amount_range_selector,
@@ -278,8 +286,6 @@ def _(
     # Account Name Filter
     for _account_type, items in account_name_dict.items():
         df_filtered = apply_filter(df_filtered, "account_name", items)
-
-    df_filtered
     return (df_filtered,)
 
 
@@ -312,7 +318,7 @@ def _(date_aggregation_selector, df_filtered, group_by_selector):
             aggfunc="sum",
             fill_value=0
         )
-        df_grouped = _df_grouped.reset_index()  # Make the index a column
+        df_grouped = df_grouped.reset_index()  # Make the index a column
     else:
         df_grouped = df_displayed.groupby("date_aggregation")["leg_amount"].sum().reset_index()
 
