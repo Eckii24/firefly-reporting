@@ -44,7 +44,7 @@ def _(file, io, mo, pd):
 
     try:
         csv_data = file.value[0].contents.decode('utf-8')
-        df = pd.read_csv(io.StringIO(csv_data))
+        df = pd.read_csv(io.StringIO(csv_data), parse_dates=["date"])
     except Exception as e:
         print(f"Error reading CSV data: {e}")
         df = pd.DataFrame()
@@ -52,102 +52,69 @@ def _(file, io, mo, pd):
 
 
 @app.cell
-def _(df, pd):
-    df['account_name'] = df['source_name']
-    df['account_type'] = df['source_type']
-    df['leg_amount'] = -abs(df['amount'])
-    df['leg_type'] = "Source"
-    df['date'] = pd.to_datetime(df['date'], utc=True)
-    return
-
-
-@app.cell
-def _(df, pd):
-    # Create a copy of the original DataFrame
-    _df_duplicated = df.copy()
-
-    # Override account_name and account_type with destination_name and destination_type
-    _df_duplicated['account_name'] = _df_duplicated['destination_name']
-    _df_duplicated['account_type'] = _df_duplicated['destination_type']
-    _df_duplicated['leg_amount'] = abs(_df_duplicated['amount'])
-    _df_duplicated['leg_type'] = "Destination"
-
-    # Concatenate the original and modified DataFrames
-    df_enhanced = pd.concat([df, _df_duplicated], ignore_index=True)
-    return (df_enhanced,)
-
-
-@app.cell
-def _(df_enhanced, mo):
+def _(df, mo):
     def get_column_values(column_name):
-        _column_values = df_enhanced[column_name].unique()
-        _column_values = [value for value in _column_values if isinstance(value, str)]
+        _column_values = df[column_name].unique()
+        _column_values = [
+            value for value in _column_values if isinstance(value, str)
+        ]
         _column_values.sort()
 
         return _column_values
+
 
     def get_column_selector(column_name):
         _column_values = get_column_values(column_name)
 
         return mo.ui.multiselect(options=_column_values)
 
+
     def get_column_selector_type():
         return mo.ui.radio(options=["Include", "Exclude"], inline=True)
 
+
     def get_column_array(column_name):
-        return mo.ui.array([
-            get_column_selector_type(),
-            get_column_selector(column_name),
-        ])
+        return mo.ui.array(
+            [
+                get_column_selector_type(),
+                get_column_selector(column_name),
+            ]
+        )
 
-    def get_column_array2(column_name_base, column_name_base_item, column_name_derived):
-        _column_values = df_enhanced[df_enhanced[column_name_base] == column_name_base_item][column_name_derived].unique()
-        _column_values = [value for value in _column_values if isinstance(value, str)]
-        _column_values.sort()
 
-    category = get_column_array("category")
-    tag = get_column_array("tags")
-    type = get_column_array("type")
-
-    #account_name_dict2 = mo.ui.dictionary({ account_type: get_column_array2("account_type", account_type, "account_name") for account_type in get_column_values("account_type") })
-    account_name_dict2 = mo.ui.dictionary({})
-
-    account_name_dict = mo.ui.dictionary({})
-    for account_type in get_column_values("account_type"):
-        account_names = df_enhanced[df_enhanced["account_type"] == account_type]["account_name"].unique()
-        account_names = [name for name in account_names if isinstance(name, str)]
-        account_names.sort()
-        account_name_dict.elements[account_type] = mo.ui.array([
-            get_column_selector_type(),
-            mo.ui.multiselect(options=account_names)
-        ])
-
-    date_range_selector = mo.ui.date_range(
-        value=(df_enhanced["date"].min().date(), df_enhanced["date"].max().date()),
-        label="Date Range",
+    filters = mo.ui.dictionary(
+        {
+            "date": mo.ui.array([mo.ui.date_range(value=(df["date"].min().date(), df["date"].max().date()))]),
+            "amount": mo.ui.array([mo.ui.range_slider(
+                start=df["amount"].min(),
+                stop=df["amount"].max(),
+                show_value=True,
+            )]),
+            "category": get_column_array("category"),
+            "tag": get_column_array("tags"),
+            "type": get_column_array("type"),
+            "source_name": get_column_array("source_name"),
+            "source_type": get_column_array("source_type"),
+            "destination_name": get_column_array("destination_name"),
+            "destination_type": get_column_array("destination_type"),
+        }
     )
+    return (filters,)
 
-    amount_range_selector = mo.ui.range_slider(
-        label="Amount Range",
-        start=df_enhanced["leg_amount"].min(),
-        stop=df_enhanced["leg_amount"].max(),
-        show_value=True
+
+@app.cell
+def _(filters, mo):
+    displays = mo.ui.dictionary(
+        {
+            "date_aggregation": mo.ui.radio(
+                options=["Day", "Week", "Month", "Quarter", "Year"], inline=True
+            ),
+            "group_by": mo.ui.dropdown(
+                options=list(filters.value.keys())
+            ),
+        }
     )
-
-    date_aggregation_selector = mo.ui.radio(options=["Day", "Week", "Month", "Quarter", "Year"], inline=True)
-
-    group_by_selector = mo.ui.dropdown(options=["type", "category", "tags", "account_name", "account_type"])
-    return (
-        account_name_dict,
-        account_name_dict2,
-        amount_range_selector,
-        category,
-        date_aggregation_selector,
-        date_range_selector,
-        group_by_selector,
-        tag,
-        type,
-    )
+    return (displays,)
 
 
 @app.cell
@@ -158,42 +125,11 @@ def _(file, mo):
 
 
 @app.cell
-def _(
-    account_name_dict,
-    account_name_dict2,
-    amount_range_selector,
-    category,
-    date_aggregation_selector,
-    date_range_selector,
-    group_by_selector,
-    mo,
-    tag,
-    type,
-):
+def _(displays, filters, mo):
     mo.accordion(
         {
             "Filter": mo.vstack(
                 [
-                    date_range_selector,
-                    amount_range_selector,
-                    mo.hstack(
-                        [mo.md("Catgory"), *category],
-                        justify="start",
-                        gap=5,
-                        widths=[1, 1, 4],
-                    ),
-                    mo.hstack(
-                        [mo.md("Tag"), *tag],
-                        justify="start",
-                        gap=5,
-                        widths=[1, 1, 4],
-                    ),
-                    mo.hstack(
-                        [mo.md("Type"), *type],
-                        justify="start",
-                        gap=5,
-                        widths=[1, 1, 4],
-                    ),
                     *[
                         mo.hstack(
                             [mo.md(selector), *items],
@@ -201,28 +137,23 @@ def _(
                             gap=5,
                             widths=[1, 1, 4],
                         )
-                        for selector, items in account_name_dict.items()
-                    ],
-                    *[
-                        mo.hstack(selector, justify="start", gap=5)
-                        for selector in account_name_dict2.values()
-                    ],
+                        for selector, items in filters.items()
+                    ]
                 ]
             ),
-            "Display": mo.vstack([
-                mo.hstack(
-                    [mo.md("Date Aggregation"), date_aggregation_selector],
-                    justify="start",
-                    gap=5,
-                    widths=[1, 4],
-                ),
-                mo.hstack(
-                    [mo.md("Group By"), group_by_selector],
-                    justify="start",
-                    gap=5,
-                    widths=[1, 4],
-                )
-            ])
+            "Display": mo.vstack(
+                [
+                    *[
+                        mo.hstack(
+                            [mo.md(selector), items],
+                            justify="start",
+                            gap=5,
+                            widths=[1, 4],
+                        )
+                        for selector, items in displays.items()
+                    ]
+                ]
+            ),
         }
     )
     return
@@ -236,31 +167,24 @@ def _(file, mo):
 
 
 @app.cell
-def _(
-    account_name_dict,
-    amount_range_selector,
-    category,
-    date_range_selector,
-    df_enhanced,
-    tag,
-    type,
-):
-    df_filtered = df_enhanced.copy()
+def _(df, filters, pd):
+    df_filtered = df.copy()
 
     # Date Range Filter
     df_filtered = df_filtered[
-        (df_filtered["date"].dt.date >= date_range_selector.value[0])
-        & (df_filtered["date"].dt.date <= date_range_selector.value[1])
+        (df_filtered["date"] >= pd.Timestamp(filters["date"][0].value[0], tz="UTC"))
+        & (df_filtered["date"] <= pd.Timestamp(filters["date"][0].value[1], tz="UTC"))
     ]
 
     # Amount Range Filter
     df_filtered = df_filtered[
-        (df_filtered["leg_amount"] >= amount_range_selector.value[0])
-        & (df_filtered["leg_amount"] <= amount_range_selector.value[1])
+        (df_filtered["amount"] >= filters["amount"][0].value[0])
+        & (df_filtered["amount"] <= filters["amount"][0].value[1])
     ]
 
 
-    def apply_filter(_df, column_name, selector_array):
+    def apply_filter(_df, column_name):
+        selector_array = filters[column_name]
         selector_type = selector_array[0].value
         selector_values = selector_array[1].value
 
@@ -275,52 +199,48 @@ def _(
 
 
     # Category Filter
-    df_filtered = apply_filter(df_filtered, "category", category)
-
-    # Tag Filter
-    df_filtered = apply_filter(df_filtered, "tags", tag)
-
-    # Type Filter
-    df_filtered = apply_filter(df_filtered, "type", type)
-
-    # Account Name Filter
-    for _account_type, items in account_name_dict.items():
-        df_filtered = apply_filter(df_filtered, "account_name", items)
+    df_filtered = apply_filter(df_filtered, "category")
+    df_filtered = apply_filter(df_filtered, "tag")
+    df_filtered = apply_filter(df_filtered, "type")
+    df_filtered = apply_filter(df_filtered, "source_name")
+    df_filtered = apply_filter(df_filtered, "source_type")
+    df_filtered = apply_filter(df_filtered, "destination_name")
+    df_filtered = apply_filter(df_filtered, "destination_type")
     return (df_filtered,)
 
 
 @app.cell
-def _(date_aggregation_selector, df_filtered, group_by_selector):
+def _(df_filtered, displays, pd):
     df_displayed = df_filtered.copy()
 
     # Date Aggregation
-    if date_aggregation_selector.value == "Day":
-        df_displayed["date_aggregation"] = df_displayed["date"].dt.strftime('%Y-%m-%d')
-    elif date_aggregation_selector.value == "Week":
-        df_displayed["date_aggregation"] = df_displayed["date"].dt.strftime('%Y-W%U')
-    elif date_aggregation_selector.value == "Month":
-        df_displayed["date_aggregation"] = df_displayed["date"].dt.strftime('%Y-%m')
-    elif date_aggregation_selector.value == "Quarter":
-        df_displayed["date_aggregation"] = df_displayed["date"].dt.strftime('%Y-Q%q')
-    elif date_aggregation_selector.value == "Year":
-        df_displayed["date_aggregation"] = df_displayed["date"].dt.strftime('%Y')
+    if displays["date_aggregation"].value == "Day":
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.strftime('%Y-%m-%d')
+    elif displays["date_aggregation"].value == "Week":
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.strftime('%Y-W%U')
+    elif displays["date_aggregation"].value == "Month":
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.strftime('%Y-%m')
+    elif displays["date_aggregation"].value == "Quarter":
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.strftime('%Y-Q%q')
+    elif displays["date_aggregation"].value == "Year":
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.strftime('%Y')
     else:
-        df_displayed["date_aggregation"] = df_displayed["date"].dt.strftime('%Y-%m-%d')
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.strftime('%Y-%m-%d')
 
     # Group By
-    group_by = group_by_selector.value if group_by_selector.value else None
+    group_by = displays["group_by"].value if displays["group_by"].value else None
 
     if group_by:
         df_grouped = df_displayed.pivot_table(
             index=group_by,
             columns="date_aggregation",
-            values="leg_amount",
+            values="amount",
             aggfunc="sum",
             fill_value=0
         )
         df_grouped = df_grouped.reset_index()  # Make the index a column
     else:
-        df_grouped = df_displayed.groupby("date_aggregation")["leg_amount"].sum().reset_index()
+        df_grouped = df_displayed.groupby("date_aggregation")["amount"].sum().reset_index()
 
     df_grouped
     return
