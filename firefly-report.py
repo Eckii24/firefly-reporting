@@ -63,21 +63,21 @@ def _(df, mo):
         return _column_values
 
 
-    def get_column_selector(column_name):
+    def get_column_selector(column_name, default_selector=None):
         _column_values = get_column_values(column_name)
 
-        return mo.ui.multiselect(options=_column_values)
+        return mo.ui.multiselect(options=_column_values, value=default_selector)
 
 
-    def get_column_selector_type():
-        return mo.ui.radio(options=["Include", "Exclude"], inline=True)
+    def get_column_selector_type(default_selector_type=None):
+        return mo.ui.radio(options=["Include", "Exclude"], inline=True, value=default_selector_type)
 
 
-    def get_column_array(column_name):
+    def get_column_array(column_name, default_selector_type=None, default_selector=None):
         return mo.ui.array(
             [
-                get_column_selector_type(),
-                get_column_selector(column_name),
+                get_column_selector_type(default_selector_type),
+                get_column_selector(column_name, default_selector),
             ]
         )
 
@@ -91,8 +91,8 @@ def _(df, mo):
                 show_value=True,
             )]),
             "category": get_column_array("category"),
-            "tag": get_column_array("tags"),
-            "type": get_column_array("type"),
+            "tags": get_column_array("tags"),
+            "type": get_column_array("type", default_selector_type="Include", default_selector=["Deposit", "Withdrawal"]),
             "source_name": get_column_array("source_name"),
             "source_type": get_column_array("source_type"),
             "destination_name": get_column_array("destination_name"),
@@ -103,14 +103,18 @@ def _(df, mo):
 
 
 @app.cell
-def _(filters, mo):
+def _(df, filters, mo):
     displays = mo.ui.dictionary(
         {
             "date_aggregation": mo.ui.radio(
-                options=["Day", "Week", "Month", "Quarter", "Year"], inline=True
+                options=["Day", "Week", "Month", "Quarter", "Year"], inline=True, value="Month"
             ),
             "group_by": mo.ui.dropdown(
-                options=list(filters.value.keys())
+                options=list(filters.value.keys(), value="category")
+            ),
+            "columns": mo.ui.multiselect(
+                options=list(df.columns),
+                value=["date", "type", "amount", "description", "source_name", "source_type", "destination_name", "destination_type", "category", "tags", "budget", "bill"],
             ),
         }
     )
@@ -172,8 +176,8 @@ def _(df, filters, pd):
 
     # Date Range Filter
     df_filtered = df_filtered[
-        (df_filtered["date"] >= pd.Timestamp(filters["date"][0].value[0], tz="UTC"))
-        & (df_filtered["date"] <= pd.Timestamp(filters["date"][0].value[1], tz="UTC"))
+        (df_filtered["date"] >= pd.Timestamp(filters["date"][0].value[0], tz="Europe/Berlin"))
+        & (df_filtered["date"] <= pd.Timestamp(filters["date"][0].value[1], tz="Europe/Berlin"))
     ]
 
     # Amount Range Filter
@@ -200,7 +204,7 @@ def _(df, filters, pd):
 
     # Category Filter
     df_filtered = apply_filter(df_filtered, "category")
-    df_filtered = apply_filter(df_filtered, "tag")
+    df_filtered = apply_filter(df_filtered, "tags")
     df_filtered = apply_filter(df_filtered, "type")
     df_filtered = apply_filter(df_filtered, "source_name")
     df_filtered = apply_filter(df_filtered, "source_type")
@@ -215,17 +219,17 @@ def _(df_filtered, displays, pd):
 
     # Date Aggregation
     if displays["date_aggregation"].value == "Day":
-        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.strftime('%Y-%m-%d')
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=False).dt.strftime('%Y-%m-%d')
     elif displays["date_aggregation"].value == "Week":
-        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.strftime('%Y-W%U')
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=False).dt.strftime('%Y-W%U')
     elif displays["date_aggregation"].value == "Month":
-        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.strftime('%Y-%m')
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=False).dt.strftime('%Y-%m')
     elif displays["date_aggregation"].value == "Quarter":
-        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.strftime('%Y-Q%q')
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=False).dt.strftime('%Y-Q%q')
     elif displays["date_aggregation"].value == "Year":
-        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.strftime('%Y')
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=False).dt.strftime('%Y')
     else:
-        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.strftime('%Y-%m-%d')
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=False).dt.strftime('%Y-%m-%d')
 
     # Group By
     group_by = displays["group_by"].value if displays["group_by"].value else None
@@ -241,8 +245,44 @@ def _(df_filtered, displays, pd):
         df_grouped = df_grouped.reset_index()  # Make the index a column
     else:
         df_grouped = df_displayed.groupby("date_aggregation")["amount"].sum().reset_index()
+    return df_displayed, df_grouped
 
-    df_grouped
+
+@app.cell
+def _(df_grouped, mo):
+    selection = mo.ui.table(df_grouped, selection="single-cell", show_column_summaries=True)
+    selection
+    return (selection,)
+
+
+@app.cell
+def _(df_displayed, df_grouped, displays, mo, selection):
+    if not selection.value or selection.value[0].column != "amount":
+        mo.stop("No selection made.")
+
+    row_index = int(selection.value[0].row)
+    column_name = selection.value[0].column
+    value = selection.value[0].value
+
+    # Get the row name based on whether grouping is applied
+    if displays["group_by"].value:
+        row_name = df_grouped[displays["group_by"].value].iloc[row_index]
+    else:
+        row_name = df_grouped['date_aggregation'].iloc[row_index]
+
+    # Filter the original DataFrame based on the selected column and value
+    if displays["group_by"].value:
+        df_selected = df_displayed[
+            (df_displayed[displays["group_by"].value] == row_name) &
+            (df_displayed['date_aggregation'] == column_name)
+        ]
+    else:
+        df_selected = df_displayed[df_displayed['date_aggregation'] == row_name]
+
+    # Select only the desired columns
+    df_selected = df_selected[displays["columns"].value]
+
+    mo.ui.table(df_selected)
     return
 
 
