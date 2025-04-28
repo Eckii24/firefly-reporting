@@ -276,11 +276,11 @@ def _(df_grouped, group_by, mo):
         },
     )
     selection
-    return (selection,)
+    return selection, style_cell
 
 
 @app.cell
-def _(df_displayed, df_grouped, displays, mo, selection):
+def _(df_displayed, df_grouped, displays, mo, selection, style_cell):
     if not selection.value:
         mo.stop("No selection made.")
 
@@ -292,21 +292,32 @@ def _(df_displayed, df_grouped, displays, mo, selection):
     if displays["group_by"].value:
         row_name = df_grouped[displays["group_by"].value].iloc[row_index]
     else:
-        row_name = df_grouped['date_aggregation'].iloc[row_index]
+        row_name = df_grouped["date_aggregation"].iloc[row_index]
 
     # Filter the original DataFrame based on the selected column and value
     if displays["group_by"].value:
         df_selected = df_displayed[
-            (df_displayed[displays["group_by"].value] == row_name) &
-            (df_displayed['date_aggregation'] == column_name)
+            (df_displayed[displays["group_by"].value] == row_name)
+            & (df_displayed["date_aggregation"] == column_name)
         ]
     else:
-        df_selected = df_displayed[df_displayed['date_aggregation'] == row_name]
+        df_selected = df_displayed[df_displayed["date_aggregation"] == row_name]
 
     # Select only the desired columns
     df_selected = df_selected[displays["columns"].value]
 
-    mo.ui.table(df_selected, page_size=25)
+    mo.ui.table(
+        df_selected,
+        page_size=25,
+        format_mapping={
+            "amount": lambda x: "{:,.2f}".format(x)
+            .replace(",", "X")
+            .replace(".", ",")
+            .replace("X", "."),
+            "date": lambda x: x.strftime("%Y-%m-%d"),
+        },
+        style_cell=style_cell,
+    )
     return
 
 
