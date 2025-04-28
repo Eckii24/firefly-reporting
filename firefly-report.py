@@ -53,7 +53,7 @@ def _(file, io, mo, pd):
 
 
 @app.cell
-def _(df, mo):
+def _(df, mo, pd):
     def get_column_values(column_name):
         _column_values = df[column_name].unique()
         _column_values = [
@@ -81,11 +81,17 @@ def _(df, mo):
                 get_column_selector(column_name, default_selector),
             ]
         )
-
+    
+    default_max_date = df["date"].max().date()
+    default_min_date = (df["date"].max() - pd.DateOffset(years=1)).date()
 
     filters = mo.ui.dictionary(
         {
-            "date": mo.ui.array([mo.ui.date_range(value=(df["date"].min().date(), df["date"].max().date()))]),
+            "date": mo.ui.array([mo.ui.date_range(
+                start=df["date"].min().date(),
+                stop=df["date"].max().date(),
+                value=(default_min_date, default_max_date)
+            )]),
             "amount": mo.ui.array([mo.ui.range_slider(
                 start=df["amount"].min(),
                 stop=df["amount"].max(),
@@ -116,7 +122,7 @@ def _(df, filters, mo):
             "columns": mo.ui.multiselect(
                 options=list(df.columns),
                 value=["date", "type", "amount", "description", "source_name", "source_type", "destination_name", "destination_type", "category", "tags", "budget", "bill"],
-            ),
+            )
         }
     )
     return (displays,)
@@ -220,15 +226,17 @@ def _(df_filtered, displays, pd):
 
     # Date Aggregation
     timezone = 'Europe/Berlin'
-    if displays["date_aggregation"].value == "Day":
+    date_aggregation_value = displays["date_aggregation"].value
+
+    if date_aggregation_value == "Day":
         df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.tz_convert(timezone).dt.strftime('%Y-%m-%d')
-    elif displays["date_aggregation"].value == "Week":
+    elif date_aggregation_value == "Week":
         df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.tz_convert(timezone).dt.strftime('%Y-W%U')
-    elif displays["date_aggregation"].value == "Month":
+    elif date_aggregation_value == "Month":
         df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.tz_convert(timezone).dt.strftime('%Y-%m')
-    elif displays["date_aggregation"].value == "Quarter":
+    elif date_aggregation_value == "Quarter":
         df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.tz_convert(timezone).dt.strftime('%Y-Q%q')
-    elif displays["date_aggregation"].value == "Year":
+    elif date_aggregation_value == "Year":
         df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.tz_convert(timezone).dt.strftime('%Y')
     else:
         df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.tz_convert(timezone).dt.strftime('%Y-%m-%d')
@@ -244,9 +252,17 @@ def _(df_filtered, displays, pd):
             aggfunc="sum",
             fill_value=0
         )
-        df_grouped = df_grouped.reset_index()  # Make the index a column
+        df_grouped = df_grouped.reset_index()
     else:
         df_grouped = df_displayed.groupby("date_aggregation")["amount"].sum().reset_index()
+
+    average = df_grouped.mean(numeric_only=True, axis=1)
+    df_grouped['Total'] = df_grouped.sum(numeric_only=True, axis=1)
+
+    df_grouped['Average'] = average
+
+    df_grouped = df_grouped.sort_values(by='Total', ascending=True)
+    df_grouped.loc['Total']= df_grouped.sum(numeric_only=True, axis=0)
     return df_displayed, df_grouped, group_by
 
 
@@ -274,6 +290,7 @@ def _(df_grouped, group_by, mo):
             for col in df_grouped.columns
             if col not in group_by
         },
+        freeze_columns_left=[df_grouped.columns[0]],
     )
     selection
     return selection, style_cell
@@ -293,7 +310,7 @@ def _(df_displayed, df_grouped, displays, mo, selection, style_cell):
         row_name = df_grouped[displays["group_by"].value].iloc[row_index]
     else:
         row_name = df_grouped["date_aggregation"].iloc[row_index]
-
+    print(row_name)
     # Filter the original DataFrame based on the selected column and value
     if displays["group_by"].value:
         df_selected = df_displayed[
