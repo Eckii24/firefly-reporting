@@ -45,6 +45,7 @@ def _(file, io, mo, pd):
     try:
         csv_data = file.value[0].contents.decode('utf-8')
         df = pd.read_csv(io.StringIO(csv_data), parse_dates=["date"])
+
     except Exception as e:
         print(f"Error reading CSV data: {e}")
         df = pd.DataFrame()
@@ -110,7 +111,7 @@ def _(df, filters, mo):
                 options=["Day", "Week", "Month", "Quarter", "Year"], inline=True, value="Month"
             ),
             "group_by": mo.ui.dropdown(
-                options=list(filters.value.keys(), value="category")
+                options=list(filters.value.keys()), value="category"
             ),
             "columns": mo.ui.multiselect(
                 options=list(df.columns),
@@ -218,18 +219,19 @@ def _(df_filtered, displays, pd):
     df_displayed = df_filtered.copy()
 
     # Date Aggregation
+    timezone = 'Europe/Berlin'
     if displays["date_aggregation"].value == "Day":
-        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=False).dt.strftime('%Y-%m-%d')
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.tz_convert(timezone).dt.strftime('%Y-%m-%d')
     elif displays["date_aggregation"].value == "Week":
-        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=False).dt.strftime('%Y-W%U')
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.tz_convert(timezone).dt.strftime('%Y-W%U')
     elif displays["date_aggregation"].value == "Month":
-        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=False).dt.strftime('%Y-%m')
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.tz_convert(timezone).dt.strftime('%Y-%m')
     elif displays["date_aggregation"].value == "Quarter":
-        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=False).dt.strftime('%Y-Q%q')
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.tz_convert(timezone).dt.strftime('%Y-Q%q')
     elif displays["date_aggregation"].value == "Year":
-        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=False).dt.strftime('%Y')
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.tz_convert(timezone).dt.strftime('%Y')
     else:
-        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=False).dt.strftime('%Y-%m-%d')
+        df_displayed["date_aggregation"] = pd.to_datetime(df_displayed["date"], utc=True).dt.tz_convert(timezone).dt.strftime('%Y-%m-%d')
 
     # Group By
     group_by = displays["group_by"].value if displays["group_by"].value else None
@@ -245,19 +247,41 @@ def _(df_filtered, displays, pd):
         df_grouped = df_grouped.reset_index()  # Make the index a column
     else:
         df_grouped = df_displayed.groupby("date_aggregation")["amount"].sum().reset_index()
-    return df_displayed, df_grouped
+    return df_displayed, df_grouped, group_by
 
 
 @app.cell
-def _(df_grouped, mo):
-    selection = mo.ui.table(df_grouped, selection="single-cell", show_column_summaries=True)
+def _(df_grouped, group_by, mo):
+    def style_cell(row_id, column_name, value):
+        if isinstance(value, (int, float)) and value < 0:
+            return {"color": "red"}
+        elif isinstance(value, (int, float)) and value > 0:
+            return {"color": "green"}
+        else:
+            return {}
+
+
+    selection = mo.ui.table(
+        df_grouped,
+        selection="single-cell",
+        page_size=25,
+        style_cell=style_cell,
+        format_mapping={
+            col: lambda x: "{:,.2f}".format(x)
+            .replace(",", "X")
+            .replace(".", ",")
+            .replace("X", ".")
+            for col in df_grouped.columns
+            if col not in group_by
+        },
+    )
     selection
     return (selection,)
 
 
 @app.cell
 def _(df_displayed, df_grouped, displays, mo, selection):
-    if not selection.value or selection.value[0].column != "amount":
+    if not selection.value:
         mo.stop("No selection made.")
 
     row_index = int(selection.value[0].row)
@@ -282,7 +306,7 @@ def _(df_displayed, df_grouped, displays, mo, selection):
     # Select only the desired columns
     df_selected = df_selected[displays["columns"].value]
 
-    mo.ui.table(df_selected)
+    mo.ui.table(df_selected, page_size=25)
     return
 
 
