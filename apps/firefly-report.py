@@ -2,7 +2,7 @@
 
 import marimo
 
-__generated_with = "0.13.0"
+__generated_with = "0.13.2"
 app = marimo.App(width="medium")
 
 
@@ -81,7 +81,7 @@ def _(df, mo, pd):
                 get_column_selector(column_name, default_selector),
             ]
         )
-    
+
     default_max_date = df["date"].max().date()
     default_min_date = (df["date"].max() - pd.DateOffset(years=1)).date()
 
@@ -305,22 +305,29 @@ def _(df_displayed, df_grouped, displays, mo, selection, style_cell):
     column_name = selection.value[0].column
     value = selection.value[0].value
 
-    # Get the row name based on whether grouping is applied
     if displays["group_by"].value:
         row_name = df_grouped[displays["group_by"].value].iloc[row_index]
-    else:
-        row_name = df_grouped["date_aggregation"].iloc[row_index]
-    print(row_name)
-    # Filter the original DataFrame based on the selected column and value
-    if displays["group_by"].value:
+
         df_selected = df_displayed[
-            (df_displayed[displays["group_by"].value] == row_name)
-            & (df_displayed["date_aggregation"] == column_name)
+            (
+                df_grouped.index[int(selection.value[0].row)] == "Total"
+                or df_displayed[displays["group_by"].value] == row_name
+            )
+            & (
+                column_name == "Total"
+                or column_name == "Average"
+                or df_displayed["date_aggregation"] == column_name
+            )
         ]
     else:
-        df_selected = df_displayed[df_displayed["date_aggregation"] == row_name]
+        row_name = df_grouped["date_aggregation"].iloc[row_index]
 
-    # Select only the desired columns
+        df_selected = df_displayed[
+            column_name == "Total"
+            or column_name == "Average"
+            or df_displayed["date_aggregation"] == column_name
+        ]
+
     df_selected = df_selected[displays["columns"].value]
 
     mo.ui.table(
