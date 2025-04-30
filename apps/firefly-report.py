@@ -299,7 +299,11 @@ def _(df_grouped, group_by, mo):
 
 @app.cell
 def _(alt, df_grouped, displays, mo, selection):
-    if not selection.value or not displays["group_by"].value or not selection.value[0].column == displays["group_by"].value:
+    if (
+        not selection.value
+        or not displays["group_by"].value
+        or not selection.value[0].column == displays["group_by"].value
+    ):
         mo.stop("No selection made.")
 
     group_by_column = displays["group_by"].value
@@ -310,29 +314,37 @@ def _(alt, df_grouped, displays, mo, selection):
     # Melt the dataframe for easier plotting
     _diagram_data = diagram_data.melt(
         id_vars=[group_by_column],
-        value_vars=[col for col in diagram_data.columns if col not in [group_by_column, 'Total', 'Average']],
-        var_name='date_aggregation',
-        value_name='amount'
+        value_vars=[
+            col
+            for col in diagram_data.columns
+            if col not in [group_by_column, "Total", "Average"]
+        ],
+        var_name="date_aggregation",
+        value_name="amount",
     )
 
     # Create the chart
-    chart = mo.ui.altair_chart(alt.Chart(_diagram_data).mark_bar().encode(
-        x=alt.X('date_aggregation:N', title='Date Aggregation'),
-        y=alt.Y('amount:Q', title='Amount'),
-        tooltip=[group_by_column, 'date_aggregation', 'amount']
-    ).properties(
-        title=f'Amount for {group_by_column} = {selected_value}'
-    ))
+    chart = mo.ui.altair_chart(
+        alt.Chart(_diagram_data)
+        .mark_bar()
+        .encode(
+            x=alt.X("date_aggregation:N", title="Date Aggregation"),
+            y=alt.Y("amount:Q", title="Amount"),
+            tooltip=[group_by_column, "date_aggregation", "amount"],
+        )
+        .properties(title=f"Amount for {group_by_column} = {selected_value}")
+    )
     chart
-    return
+    return (chart,)
 
 
 @app.cell
 def _(df_displayed, df_grouped, displays, mo, selection, style_cell):
-    if not selection.value:
+    if (
+        not selection.value
+        or selection.value[0].column == displays["group_by"].value
+    ):
         mo.stop("No selection made.")
-
-    # chart.value["date_aggregation"].values[0]
 
     row_index = int(selection.value[0].row)
     column_name = selection.value[0].column
@@ -364,6 +376,38 @@ def _(df_displayed, df_grouped, displays, mo, selection, style_cell):
 
     mo.ui.table(
         df_selected,
+        page_size=25,
+        format_mapping={
+            "amount": lambda x: "{:,.2f}".format(x)
+            .replace(",", "X")
+            .replace(".", ",")
+            .replace("X", "."),
+            "date": lambda x: x.strftime("%Y-%m-%d"),
+        },
+        style_cell=style_cell,
+    )
+    return
+
+
+@app.cell
+def _(chart, df_displayed, df_grouped, displays, mo, selection, style_cell):
+    if not len(chart.value["date_aggregation"].values):
+        mo.stop("No selection made.")
+
+    _row_index = int(selection.value[0].row)
+    _column_names = chart.value["date_aggregation"].values
+
+    _row_name = df_grouped[displays["group_by"].value].iloc[_row_index]
+
+    _df_selected = df_displayed[
+        (df_displayed[displays["group_by"].value] == _row_name)
+        & (df_displayed["date_aggregation"].isin(_column_names))
+    ]
+
+    _df_selected = _df_selected[displays["columns"].value]
+
+    mo.ui.table(
+        _df_selected,
         page_size=25,
         format_mapping={
             "amount": lambda x: "{:,.2f}".format(x)
